@@ -49,18 +49,23 @@ namespace WinFormsAspNetCore
 
         private class MyServer : IServer
         {
-            public IFeatureCollection Features { get; } = new FeatureCollection();
+            private Executor _executor;
 
-            public Executor Executor { get; private set; }
+            public IFeatureCollection Features { get; } = new FeatureCollection();
 
             public void Dispose()
             {
-                
+
+            }
+
+            public Task ExecuteAsync(IFeatureCollection features)
+            {
+                return _executor.ExecuteAsync(features);
             }
 
             public void Start<TContext>(IHttpApplication<TContext> application)
             {
-                Executor = new Executor<TContext>(application);
+                _executor = new Executor<TContext>(application);
             }
         }
 
@@ -83,7 +88,7 @@ namespace WinFormsAspNetCore
                 try
                 {
                     await _application.ProcessRequestAsync(context);
-                    await((MyHttpResponseFeature)features.Get<IHttpResponseFeature>()).RequestFinished();
+                    await ((MyHttpResponseFeature)features.Get<IHttpResponseFeature>()).RequestFinished();
 
                     _application.DisposeContext(context, null);
                 }
@@ -139,7 +144,7 @@ namespace WinFormsAspNetCore
 
             public void OnStarting(Func<object, Task> callback, object state)
             {
-                
+
             }
 
             public Task RequestFinished()
@@ -155,7 +160,7 @@ namespace WinFormsAspNetCore
             var features = new FeatureCollection();
             features.Set<IHttpRequestFeature>(request);
             features.Set<IHttpResponseFeature>(response);
-            await _server.Executor.ExecuteAsync(features);
+            await _server.ExecuteAsync(features);
 
             response.Body.Position = 0;
             webBrowser1.DocumentStream = response.Body;
