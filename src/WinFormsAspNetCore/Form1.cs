@@ -103,7 +103,7 @@ namespace WinFormsAspNetCore
         {
             public Stream Body { get; set; } = new MemoryStream();
 
-            public IHeaderDictionary Headers { get; set; }
+            public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
 
             public string Method { get; set; }
 
@@ -126,7 +126,7 @@ namespace WinFormsAspNetCore
 
             public bool HasStarted { get; }
 
-            public IHeaderDictionary Headers { get; set; }
+            public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
 
             public string ReasonPhrase { get; set; }
 
@@ -153,17 +153,49 @@ namespace WinFormsAspNetCore
             }
         }
 
-        private async void button1_Click(object sender, EventArgs e)
+        private void button1_Click(object sender, EventArgs e)
         {
+            GetRequest(txtPath.Text);
+        }
+
+        private async void GetRequest(string path)
+        {
+            if (!path.StartsWith("/"))
+            {
+                path = "/" + path;
+            }
             var request = new MyHttpRequestFeature();
             var response = new MyHttpResponseFeature();
             var features = new FeatureCollection();
+            request.Path = path;
+            request.Method = "GET";
             features.Set<IHttpRequestFeature>(request);
             features.Set<IHttpResponseFeature>(response);
             await _server.ExecuteAsync(features);
 
             response.Body.Position = 0;
+            _loading = true;
             webBrowser1.DocumentStream = response.Body;
+        }
+
+        private bool _loading = false;
+
+        private void webBrowser1_Navigating(object sender, WebBrowserNavigatingEventArgs e)
+        {
+            if (_loading == true)
+            {
+                return;
+            }
+
+            var path = e.Url.PathAndQuery;
+            GetRequest(path);
+
+            e.Cancel = true;
+        }
+
+        private void webBrowser1_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        {
+            _loading = false;
         }
     }
 }
