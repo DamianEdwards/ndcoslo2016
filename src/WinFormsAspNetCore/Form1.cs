@@ -21,7 +21,6 @@ namespace WinFormsAspNetCore
     {
         private IWebHost _webHost;
         private MyServer _server;
-        private BlockingCollection<IFeatureCollection> _requests = new BlockingCollection<IFeatureCollection>();
 
         public Form1()
         {
@@ -32,7 +31,7 @@ namespace WinFormsAspNetCore
 
         private void StartWeb()
         {
-            _server = new MyServer(_requests);
+            _server = new MyServer();
             _webHost = new WebHostBuilder()
                 .UseStartup<Startup>()
                 .UseServer(_server)
@@ -50,14 +49,9 @@ namespace WinFormsAspNetCore
 
         private class MyServer : IServer
         {
-            private readonly BlockingCollection<IFeatureCollection> _requests;
-
-            public MyServer(BlockingCollection<IFeatureCollection> requests)
-            {
-                _requests = requests;
-            }
-
             public IFeatureCollection Features { get; } = new FeatureCollection();
+
+            public Executor Executor { get; private set; }
 
             public void Dispose()
             {
@@ -66,24 +60,37 @@ namespace WinFormsAspNetCore
 
             public void Start<TContext>(IHttpApplication<TContext> application)
             {
-                Task.Run(async () =>
-                {
-                    foreach (var features in _requests.GetConsumingEnumerable())
-                    {
-                        var context = application.CreateContext(features);
-                        try
-                        {
-                            await application.ProcessRequestAsync(context);
-                            await ((MyHttpResponseFeature)features.Get<IHttpResponseFeature>()).RequestFinished();
+                Executor = new Executor<TContext>(application);
+            }
+        }
 
-                            application.DisposeContext(context, null);
-                        }
-                        catch (Exception ex)
-                        {
-                            application.DisposeContext(context, ex);
-                        }
-                    }
-                });
+        public abstract class Executor
+        {
+            public abstract Task ExecuteAsync(IFeatureCollection features);
+        }
+
+        public class Executor<TContext> : Executor
+        {
+            private readonly IHttpApplication<TContext> _application;
+            public Executor(IHttpApplication<TContext> application)
+            {
+                _application = application;
+            }
+
+            public override async Task ExecuteAsync(IFeatureCollection features)
+            {
+                var context = _application.CreateContext(features);
+                try
+                {
+                    await _application.ProcessRequestAsync(context);
+                    await((MyHttpResponseFeature)features.Get<IHttpResponseFeature>()).RequestFinished();
+
+                    _application.DisposeContext(context, null);
+                }
+                catch (Exception ex)
+                {
+                    _application.DisposeContext(context, ex);
+                }
             }
         }
 
@@ -145,21 +152,13 @@ namespace WinFormsAspNetCore
         {
             var request = new MyHttpRequestFeature();
             var response = new MyHttpResponseFeature();
-
-            var complete = new TaskCompletionSource<Stream>();
-            response.OnCompleted(state =>
-            {
-                response.Body.Position = 0;
-                complete.SetResult(response.Body);
-                return Task.FromResult(0);
-            }, null);
-
             var features = new FeatureCollection();
             features.Set<IHttpRequestFeature>(request);
             features.Set<IHttpResponseFeature>(response);
-            _requests.Add(features);
+            await _server.Executor.ExecuteAsync(features);
 
-            webBrowser1.DocumentStream = await complete.Task;
+            response.Body.Position = 0;
+            webBrowser1.DocumentStream = response.Body;
         }
     }
 }
