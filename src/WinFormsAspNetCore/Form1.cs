@@ -6,6 +6,7 @@ using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -21,22 +22,58 @@ namespace WinFormsAspNetCore
     {
         private IWebHost _webHost;
         private MyServer _server;
+        private bool _loadingDocument = false;
+        private string _appAssemblyDirPath;
 
         public Form1()
         {
             InitializeComponent();
 
             StartWeb();
+            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
         }
 
-        private void StartWeb()
+        private Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
         {
-            _server = new MyServer();
-            _webHost = new WebHostBuilder()
-                .UseStartup<Startup>()
-                .UseServer(_server)
-                .Build();
+            var loadPath = Path.Combine(_appAssemblyDirPath, new AssemblyName(args.Name).Name + ".dll");
 
+            if (File.Exists(loadPath))
+            {
+                return Assembly.LoadFile(loadPath);
+            }
+
+            loadPath = Path.ChangeExtension(loadPath, ".exe");
+            if (File.Exists(loadPath))
+            {
+                return Assembly.LoadFile(loadPath);
+            }
+
+            return null;
+        }
+
+        private void StartWeb(string assemblyPath = null)
+        {
+            _webHost?.Dispose();
+
+            _server = new MyServer();
+
+            var webHostBuilder = new WebHostBuilder()
+                .UseServer(_server);
+
+            if (assemblyPath == null)
+            {
+                webHostBuilder.UseStartup<Startup>();
+            }
+            else
+            {
+                _appAssemblyDirPath = Path.GetDirectoryName(assemblyPath);
+                var assemblyName = AssemblyName.GetAssemblyName(assemblyPath);
+                webHostBuilder.UseStartup(assemblyName.Name);
+                var contentRoot = Path.GetFullPath( Path.Combine(_appAssemblyDirPath, "../../../../"));
+                webHostBuilder.UseContentRoot(contentRoot);
+            }
+
+            _webHost = webHostBuilder.Build();
             _webHost.Start();
         }
 
@@ -94,6 +131,7 @@ namespace WinFormsAspNetCore
                 }
                 catch (Exception ex)
                 {
+                    ((MyHttpResponseFeature)features.Get<IHttpResponseFeature>()).StatusCode = 500;
                     _application.DisposeContext(context, ex);
                 }
             }
@@ -164,25 +202,25 @@ namespace WinFormsAspNetCore
             {
                 path = "/" + path;
             }
-            var request = new MyHttpRequestFeature();
-            var response = new MyHttpResponseFeature();
             var features = new FeatureCollection();
-            request.Path = path;
-            request.Method = "GET";
-            features.Set<IHttpRequestFeature>(request);
+            features.Set<IHttpRequestFeature>(new MyHttpRequestFeature
+            {
+                Path = path,
+                Method = "GET"
+            });
+            var response = new MyHttpResponseFeature();
             features.Set<IHttpResponseFeature>(response);
+
             await _server.ExecuteAsync(features);
 
             response.Body.Position = 0;
-            _loading = true;
+            _loadingDocument = true;
             webBrowser1.DocumentStream = response.Body;
         }
 
-        private bool _loading = false;
-
         private void webBrowser1_Navigating(object sender, WebBrowserNavigatingEventArgs e)
         {
-            if (_loading == true)
+            if (_loadingDocument == true)
             {
                 return;
             }
@@ -191,11 +229,28 @@ namespace WinFormsAspNetCore
             GetRequest(path);
 
             e.Cancel = true;
+
+            txtPath.Text = e.Url.PathAndQuery;
         }
 
         private void webBrowser1_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
-            _loading = false;
+            _loadingDocument = false;
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            var result = ofdWebApp.ShowDialog();
+        }
+
+        private void ofdWebApp_FileOk(object sender, CancelEventArgs e)
+        {
+            StartWeb(ofdWebApp.FileName);
+        }
+
+        private void button3_Click(object sender, EventArgs e)
+        {
+            webBrowser1.GoBack();
         }
     }
 }
